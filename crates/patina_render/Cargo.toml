@@ -1,0 +1,16 @@
+[package]
+name = "patina_render"
+description = "Patina viewport renderer: PBR shading, studio lighting, tonemapping, UV view"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+patina_core.workspace = true
+patina_mesh.workspace = true
+wgpu.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+log.workspace = true
+thiserror.workspace = true
+pollster.workspace = true

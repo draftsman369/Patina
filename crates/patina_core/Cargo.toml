@@ -1,0 +1,10 @@
+[package]
+name = "patina_core"
+description = "Patina project model: texture sets, channels and images (no GPU, no UI)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+image.workspace = true

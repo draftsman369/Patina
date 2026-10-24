@@ -1,0 +1,35 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/draftsman369/Patina"
+rust-version = "1.88"
+
+[workspace.dependencies]
+patina_core = { path = "crates/patina_core" }
+patina_mesh = { path = "crates/patina_mesh" }
+patina_render = { path = "crates/patina_render" }
+
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+bytemuck = { version = "1", features = ["derive"] }
+glam = { version = "0.30", features = ["bytemuck"] }
+gltf = "1.4"
+tobj = "4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp", "tiff", "hdr"] }
+mikktspace = { version = "0.3", default-features = false, features = ["glam"] }
+pollster = "1"
+wgpu = "30"
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "persistence"] }
+egui = "0.37"
+rfd = "0.17"
+clap = { version = "4", features = ["derive"] }
+
+[profile.dev.package."*"]
+opt-level = 2
