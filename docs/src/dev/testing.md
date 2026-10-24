@@ -11,6 +11,14 @@ from in-memory OBJ/glTF fixtures, primitive validity (including triangle
 winding), normal/tangent generation, camera framing, mip generation, UV view
 transforms and CLI parsing.
 
+## GPU bake tests
+
+`crates/patina_bake/tests/bake.rs` bakes small scenes and checks values:
+a mesh baked onto itself gives a flat normal map; a cube baked from a sphere
+has flat face centers, tilted corners and green-up normals; AO is dark under
+and around a box sitting on a plane; multi-tile bakes cover the whole map;
+cancellation stops a bake. Outputs are written to `target/bake-tests/`.
+
 ## GPU snapshot tests
 
 `crates/patina_render/tests/snapshot.rs` renders fixed scenes at 256×256 and

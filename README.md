@@ -5,23 +5,30 @@ PBR painting on meshes, a layer stack with masks and effects, mesh-map baking,
 smart materials and texture export for game engines. It is free software under
 the **GNU GPL v3 or later**.
 
-> Status: early development. Milestone **M1 (viewport & UI shell)** is in
-> progress: you can open meshes and inspect them with PBR shading, but painting
-> arrives in M4. See [ROADMAP.md](ROADMAP.md) for the full plan.
+> Status: early development. Milestones **M1 (viewport & UI shell)** and
+> **M2 (HDRI lighting & baking)** are done: you can open meshes, light them with
+> HDRIs and bake mesh maps. Layers arrive in M3 and painting in M4. See
+> [ROADMAP.md](ROADMAP.md) for the full plan.
 
 ## What works today
 
-- Open **OBJ** (with MTL) and **glTF / GLB** meshes, or start from built-in
-  primitives (sphere, cube, cylinder, torus, plane).
+- Open **OBJ** (with MTL), **glTF / GLB** and **FBX** meshes, or start from
+  built-in primitives (sphere, cube, cylinder, torus, plane).
 - One **texture set per material**, seeded from the file's PBR factors and textures.
 - Real-time **metal/rough PBR** viewport with HDR rendering, 4× MSAA and
   **ACES / Filmic / Linear** tonemapping.
-- Five analytic **studio environments** with rotation, exposure and background blur.
+- **Image-based lighting** from HDRIs (`.hdr`, `.exr`) or five built-in studio
+  presets: GGX-prefiltered reflections, SH9 diffuse, rotation, exposure, background blur.
 - **Channel views**: material, base color, metallic, roughness, normal,
   world normal, UV checker, emissive. Optional **wireframe** overlay.
 - **2D UV view** with the UV layout over the current channel; F1/F2/F3 layouts.
 - Load an image into any channel slot (Properties panel or drag-and-drop).
-- Headless rendering: `patina --snapshot out.png`.
+- **GPU mesh-map baking**: normal, world normal, ID, AO, curvature, position,
+  thickness, height, opacity and bent normal, from the mesh itself or a
+  high-poly (cage, match by name, supersampling, dilation). Results show in
+  the viewport with **B**.
+- Headless rendering and baking: `patina --snapshot out.png`,
+  `patina low.fbx --bake out/ --high high.fbx`.
 
 ## Building
 
@@ -34,7 +41,8 @@ cargo run --release -p patina_app -- model.glb
 cargo run --release -p patina_app -- --snapshot out.png --primitive torus
 ```
 
-On Linux you need `pkg-config`, `libxkbcommon-dev` and `libwayland-dev` to build.
+A C compiler is needed for the FBX importer (ufbx). On Linux you also need
+`pkg-config`, `libxkbcommon-dev` and `libwayland-dev`.
 
 ## Viewport controls
 
@@ -46,15 +54,16 @@ On Linux you need `pkg-config`, `libxkbcommon-dev` and `libwayland-dev` to build
 | Rotate environment | Shift + right drag |
 | Frame mesh | F |
 | Layouts 3D+2D / 3D / 2D | F1 / F2 / F3 |
-| Cycle channel views / material view | C / M |
+| Cycle channel views / mesh maps / material view | C / B / M |
 
 ## Repository layout
 
 ```
 crates/
   patina_core/     project model: texture sets, channels, images
-  patina_mesh/     mesh data, OBJ/glTF import, primitives, tangents
-  patina_render/   wgpu viewport renderer, UV view, headless snapshots
+  patina_mesh/     mesh data, OBJ/glTF/FBX import, primitives, tangents, BVH
+  patina_render/   wgpu viewport renderer, image-based lighting, UV view, snapshots
+  patina_bake/     GPU mesh-map bakers
   patina_app/      egui editor and the `patina` binary
 docs/              user and developer documentation (mdBook)
 tests/snapshots/   reference images for GPU render tests

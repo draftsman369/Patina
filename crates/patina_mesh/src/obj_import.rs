@@ -4,9 +4,7 @@ use std::path::Path;
 
 use patina_core::Image;
 
-use crate::{
-    MaterialDesc, Mesh, MeshBuilder, MeshError, Vertex, generate_normals, generate_tangents,
-};
+use crate::{MaterialDesc, Mesh, MeshBuilder, MeshError, Vertex, generate_normals};
 
 pub fn load(path: &Path) -> Result<Mesh, MeshError> {
     let (models, materials) = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS)?;
@@ -65,23 +63,40 @@ pub(crate) fn build(
                 } else {
                     [0.0; 2]
                 },
-                tangent: [1.0, 0.0, 0.0, 1.0],
+                color: if m.vertex_color.len() == m.positions.len() {
+                    [0, 1, 2, 3].map(|c| {
+                        let v = if c < 3 {
+                            m.vertex_color[i * 3 + c]
+                        } else {
+                            1.0
+                        };
+                        (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+                    })
+                } else {
+                    [255; 4]
+                },
+                ..Default::default()
             })
             .collect();
         if !has_normals {
             generate_normals(&mut vertices, &m.indices);
         }
+        let object = builder.add_object(if model.name.is_empty() {
+            name
+        } else {
+            &model.name
+        });
 
         let material = match m.material_id.filter(|&id| id < materials.len()) {
             Some(id) => id,
             None => *default_material
                 .get_or_insert_with(|| builder.add_material(MaterialDesc::named("Default"))),
         };
-        builder.add(material, &vertices, &m.indices);
+        builder.add(material, object, &vertices, &m.indices);
     }
 
     let mut mesh = builder.build(name.to_owned(), has_uvs)?;
-    generate_tangents(&mut mesh.vertices, &mesh.indices);
+    mesh.generate_tangents();
     Ok(mesh)
 }
 
@@ -175,8 +190,13 @@ f 4/1 5/2 6/3 7/4
         assert_eq!(mesh.parts[0].index_count, 6);
         // One object lacks UVs, so the mesh is flagged.
         assert!(!mesh.has_uvs);
-        // Quad vertices come after the 3 triangle vertices; vt 0 0 → (0, 1).
-        assert_eq!(mesh.vertices[3].uv, [0.0, 1.0]);
+        // The quad corner at the origin had vt 0 0, flipped to (0, 1).
+        let corner = mesh
+            .vertices
+            .iter()
+            .find(|v| v.position == [0.0; 3])
+            .unwrap();
+        assert_eq!(corner.uv, [0.0, 1.0]);
     }
 
     #[test]

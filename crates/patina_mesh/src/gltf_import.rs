@@ -7,9 +7,7 @@ use glam::{Mat3, Mat4, Vec3};
 use gltf::image::Format;
 use patina_core::Image;
 
-use crate::{
-    MaterialDesc, Mesh, MeshBuilder, MeshError, Vertex, generate_normals, generate_tangents,
-};
+use crate::{MaterialDesc, Mesh, MeshBuilder, MeshError, Vertex, generate_normals};
 
 pub fn load(path: &Path) -> Result<Mesh, MeshError> {
     let (doc, buffers, images) = gltf::import(path)?;
@@ -36,6 +34,12 @@ pub fn load(path: &Path) -> Result<Mesh, MeshError> {
         stack.extend(node.children().map(|c| (c, world)));
         let Some(mesh) = node.mesh() else { continue };
 
+        let object_name = node
+            .name()
+            .or(mesh.name())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("Node {}", node.index()));
+        let object = builder.add_object(object_name);
         let normal_matrix = Mat3::from_mat4(world).inverse().transpose();
         let flips_winding = world.determinant() < 0.0;
 
@@ -53,6 +57,8 @@ pub fn load(path: &Path) -> Result<Mesh, MeshError> {
             let uvs: Option<Vec<[f32; 2]>> =
                 reader.read_tex_coords(0).map(|t| t.into_f32().collect());
             has_uvs &= uvs.is_some();
+            let colors: Option<Vec<[u8; 4]>> =
+                reader.read_colors(0).map(|c| c.into_rgba_u8().collect());
 
             let mut indices: Vec<u32> = match reader.read_indices() {
                 Some(i) => i.into_u32().collect(),
@@ -78,7 +84,8 @@ pub fn load(path: &Path) -> Result<Mesh, MeshError> {
                         })
                         .unwrap_or_default(),
                     uv: uvs.as_ref().map(|t| t[i]).unwrap_or_default(),
-                    tangent: [1.0, 0.0, 0.0, 1.0],
+                    color: colors.as_ref().map(|c| c[i]).unwrap_or([255; 4]),
+                    ..Default::default()
                 })
                 .collect();
             if normals.is_none() {
@@ -90,12 +97,12 @@ pub fn load(path: &Path) -> Result<Mesh, MeshError> {
                 None => *default_material
                     .get_or_insert_with(|| builder.add_material(MaterialDesc::named("Default"))),
             };
-            builder.add(material, &vertices, &indices);
+            builder.add(material, object, &vertices, &indices);
         }
     }
 
     let mut mesh = builder.build(name, has_uvs)?;
-    generate_tangents(&mut mesh.vertices, &mesh.indices);
+    mesh.generate_tangents();
     Ok(mesh)
 }
 

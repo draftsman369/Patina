@@ -46,6 +46,13 @@ pub fn is_mesh_path(path: &Path) -> bool {
     has_extension(path, patina_mesh::SUPPORTED_EXTENSIONS)
 }
 
+/// Formats accepted as HDRI environments.
+pub const HDRI_EXTENSIONS: &[&str] = &["hdr", "exr"];
+
+pub fn is_hdri_path(path: &Path) -> bool {
+    has_extension(path, HDRI_EXTENSIONS)
+}
+
 /// Image formats accepted for channel slots.
 pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tga", "bmp", "tif", "tiff", "hdr"];
 
@@ -83,8 +90,11 @@ mod tests {
     fn recognizes_file_types() {
         assert!(is_mesh_path(Path::new("a/b/Model.GLB")));
         assert!(is_mesh_path(Path::new("x.obj")));
-        assert!(!is_mesh_path(Path::new("x.fbx")));
+        assert!(is_mesh_path(Path::new("x.FBX")));
+        assert!(!is_mesh_path(Path::new("x.blend")));
         assert!(is_image_path(Path::new("albedo.PNG")));
+        assert!(is_hdri_path(Path::new("studio.EXR")));
+        assert!(!is_hdri_path(Path::new("albedo.png")));
         assert!(!is_image_path(Path::new("notes.txt")));
     }
 }

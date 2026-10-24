@@ -1,4 +1,4 @@
-use crate::{Channel, Image};
+use crate::{Channel, Image, MeshMap};
 
 /// How the green channel of normal maps is interpreted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -27,6 +27,8 @@ pub struct TextureSet {
     /// Optional bitmap per channel, indexed by [`Channel::index`].
     /// `None` means the channel uses its factor only.
     pub images: [Option<Image>; Channel::COUNT],
+    /// Baked or imported mesh maps, indexed by [`MeshMap::index`].
+    pub mesh_maps: [Option<Image>; MeshMap::COUNT],
 }
 
 impl TextureSet {
@@ -40,6 +42,7 @@ impl TextureSet {
             roughness_factor: 0.5,
             emissive_factor: [0.0; 3],
             images: Default::default(),
+            mesh_maps: Default::default(),
         }
     }
 
@@ -49,6 +52,14 @@ impl TextureSet {
 
     pub fn set_image(&mut self, channel: Channel, image: Option<Image>) {
         self.images[channel.index()] = image;
+    }
+
+    pub fn mesh_map(&self, map: MeshMap) -> Option<&Image> {
+        self.mesh_maps[map.index()].as_ref()
+    }
+
+    pub fn set_mesh_map(&mut self, map: MeshMap, image: Option<Image>) {
+        self.mesh_maps[map.index()] = image;
     }
 }
 

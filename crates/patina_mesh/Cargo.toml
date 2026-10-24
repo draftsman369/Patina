@@ -14,3 +14,4 @@ glam.workspace = true
 gltf.workspace = true
 tobj.workspace = true
 mikktspace.workspace = true
+ufbx.workspace = true

@@ -21,3 +21,4 @@ log.workspace = true
 env_logger.workspace = true
 clap.workspace = true
 rfd.workspace = true
+patina_bake.workspace = true

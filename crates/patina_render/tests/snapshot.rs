@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use patina_core::{Channel, Image, Project};
 use patina_mesh::primitives::Primitive;
 use patina_render::{
-    HeadlessGpu, OrbitCamera, Renderer, UvTarget, UvView, ViewMode, ViewportSettings, read_texture,
-    render_snapshot,
+    EnvSource, HeadlessGpu, OrbitCamera, Renderer, UvLayer, UvTarget, UvView, ViewMode,
+    ViewportSettings, read_texture, render_snapshot,
 };
 
 const SIZE: u32 = 256;
@@ -230,7 +230,7 @@ fn viewport_snapshots() {
     );
 
     let sunset = ViewportSettings {
-        env_preset: 3,
+        environment: EnvSource::Preset(3),
         ..Default::default()
     };
     let gold = |p: &mut Project| {
@@ -252,6 +252,93 @@ fn viewport_snapshots() {
         "cylinder_world_normal",
         &f.render(Primitive::Cylinder, |_| {}, &normals),
     );
+
+    let mesh_map_view = ViewportSettings {
+        view_mode: ViewMode::MeshMap,
+        mesh_map: patina_core::MeshMap::Curvature,
+        ..Default::default()
+    };
+    let with_map = |p: &mut Project| {
+        p.texture_sets[0].set_mesh_map(patina_core::MeshMap::Curvature, Some(gradient_image()));
+    };
+    check(
+        "sphere_mesh_map",
+        &f.render(Primitive::Sphere, with_map, &mesh_map_view),
+    );
+}
+
+/// Equirectangular test HDRI: blue sky, brown ground, a bright warm sun and
+/// colored markers on the horizon so orientation errors are obvious.
+fn synthetic_hdri() -> std::sync::Arc<patina_core::HdrImage> {
+    let (w, h) = (256u32, 128u32);
+    let mut data = Vec::with_capacity((w * h) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let u = (x as f32 + 0.5) / w as f32;
+            let v = (y as f32 + 0.5) / h as f32;
+            let mut c = if v < 0.5 {
+                [0.25, 0.45, 0.9, 1.0]
+            } else {
+                [0.3, 0.2, 0.1, 1.0]
+            };
+            // Horizon markers: red at u=0.25, green at u=0.5, blue-white at u=0.75.
+            let near = |cu: f32| (u - cu).abs() < 0.03 && (v - 0.5).abs() < 0.06;
+            if near(0.25) {
+                c = [4.0, 0.2, 0.2, 1.0];
+            } else if near(0.5) {
+                c = [0.2, 4.0, 0.2, 1.0];
+            } else if near(0.75) {
+                c = [2.0, 2.0, 6.0, 1.0];
+            }
+            // Sun high in the sky.
+            if (u - 0.6).abs() < 0.02 && (v - 0.2).abs() < 0.03 {
+                c = [80.0, 70.0, 50.0, 1.0];
+            }
+            data.push(c);
+        }
+    }
+    std::sync::Arc::new(patina_core::HdrImage::new(w, h, data).unwrap())
+}
+
+#[test]
+fn reflection_snapshots() {
+    let Some(gpu) = gpu() else { return };
+    let f = Fixture::new(&gpu);
+    let chrome = |p: &mut Project| {
+        let set = &mut p.texture_sets[0];
+        set.base_color_factor = [0.95, 0.95, 0.95, 1.0];
+        set.metallic_factor = 1.0;
+        set.roughness_factor = 0.0;
+    };
+    let studio = ViewportSettings {
+        background_blur: 0.0,
+        ..Default::default()
+    };
+    check(
+        "sphere_chrome_studio",
+        &f.render(Primitive::Sphere, chrome, &studio),
+    );
+
+    let hdri = ViewportSettings {
+        environment: EnvSource::Hdri {
+            image: synthetic_hdri(),
+            name: "synthetic".into(),
+        },
+        background_blur: 0.0,
+        ..Default::default()
+    };
+    check(
+        "sphere_chrome_hdri",
+        &f.render(Primitive::Sphere, chrome, &hdri),
+    );
+    let rough = |p: &mut Project| {
+        chrome(p);
+        p.texture_sets[0].roughness_factor = 0.5;
+    };
+    check(
+        "sphere_rough_hdri",
+        &f.render(Primitive::Sphere, rough, &hdri),
+    );
 }
 
 #[test]
@@ -272,7 +359,13 @@ fn uv_view_snapshot() {
     let target = UvTarget::new(&renderer, SIZE, SIZE);
     let mut view = UvView::default();
     view.fit(glam::Vec2::splat(SIZE as f32));
-    renderer.render_uv(&target, &scene, 0, &view, Channel::BaseColor);
+    renderer.render_uv(
+        &target,
+        &scene,
+        0,
+        &view,
+        UvLayer::Channel(Channel::BaseColor),
+    );
     let image = read_texture(&gpu.device, &gpu.queue, target.output()).unwrap();
     check_with("cube_uv_view", &image, 0.03);
 }

@@ -7,6 +7,7 @@
 - [Getting started](getting-started.md)
 - [The viewport](viewport.md)
 - [Texture sets and channels](texture-sets.md)
+- [Baking mesh maps](baking.md)
 - [Command line](cli.md)
 
 # Developer guide

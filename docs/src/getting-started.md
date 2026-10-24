@@ -2,7 +2,7 @@
 
 ## Opening a mesh
 
-- **File › Open mesh…** (Ctrl+O) opens an OBJ, glTF or GLB file.
+- **File › Open mesh…** (Ctrl+O) opens an OBJ, glTF, GLB or FBX file.
 - **File › New project…** (Ctrl+N) opens the New Project dialog: pick a mesh
   or a primitive, the document resolution and the normal map format
   (OpenGL or DirectX).

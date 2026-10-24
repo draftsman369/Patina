@@ -5,7 +5,7 @@
 struct UvParams {
     // xy = scale (UV → NDC), zw = offset.
     transform: vec4<f32>,
-    // x = channel to display (Channel::index), y = 1 if the mesh has UVs.
+    // x = channel to display (Channel::index, or 5 for the selected mesh map), y = 1 if the mesh has UVs.
     channel: vec4<u32>,
     wire_color: vec4<f32>,
 }
@@ -37,7 +37,8 @@ fn channel_value(uv: vec2<f32>) -> vec3<f32> {
         case 1u: { return display_data(vec3(material.params.x * textureSample(t_metallic, s_material, uv).r)); }
         case 2u: { return display_data(vec3(material.params.y * textureSample(t_roughness, s_material, uv).r)); }
         case 3u: { return display_data(textureSample(t_normal, s_material, uv).rgb); }
-        default: { return material.emissive.rgb * textureSample(t_emissive, s_material, uv).rgb; }
+        case 4u: { return material.emissive.rgb * textureSample(t_emissive, s_material, uv).rgb; }
+        default: { return display_data(textureSample(t_mesh_map, s_material, uv).rgb); }
     }
 }
 

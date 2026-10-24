@@ -13,6 +13,7 @@ rust-version = "1.88"
 patina_core = { path = "crates/patina_core" }
 patina_mesh = { path = "crates/patina_mesh" }
 patina_render = { path = "crates/patina_render" }
+patina_bake = { path = "crates/patina_bake" }
 
 anyhow = "1"
 thiserror = "2"
@@ -22,7 +23,8 @@ bytemuck = { version = "1", features = ["derive"] }
 glam = { version = "0.30", features = ["bytemuck"] }
 gltf = "1.4"
 tobj = "4"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp", "tiff", "hdr"] }
+ufbx = "0.11"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga", "bmp", "tiff", "hdr", "exr"] }
 mikktspace = { version = "0.3", default-features = false, features = ["glam"] }
 pollster = "1"
 wgpu = "30"
@@ -32,4 +34,11 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive"] }
 
 [profile.dev.package."*"]
+opt-level = 2
+
+# CPU-heavy post-processing (dilation, BVH builds) stays fast in debug builds.
+[profile.dev.package.patina_bake]
+opt-level = 2
+
+[profile.dev.package.patina_mesh]
 opt-level = 2

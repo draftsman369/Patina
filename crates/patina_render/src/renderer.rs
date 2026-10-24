@@ -1,10 +1,14 @@
 use bytemuck::{Pod, Zeroable};
-use glam::Vec3;
-use patina_core::{Channel, Image, NormalFormat, Project, TextureSet};
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use patina_core::{Channel, Image, MeshMap, NormalFormat, Project, TextureSet};
 use patina_mesh::{Mesh, Vertex};
 use wgpu::util::DeviceExt;
 
 use crate::camera::OrbitCamera;
+use crate::environment::{Environment, Ibl};
 use crate::settings::{Tonemap, ViewMode, ViewportSettings};
 use crate::texture;
 
@@ -26,11 +30,7 @@ struct FrameUniforms {
     inv_view_proj: [[f32; 4]; 4],
     camera_pos: [f32; 4],
     env: [f32; 4],
-    sky_top: [f32; 4],
-    sky_horizon: [f32; 4],
-    sky_ground: [f32; 4],
-    /// Four lights, each (direction + sharpness, color).
-    lights: [[f32; 4]; 8],
+    env_info: [f32; 4],
     mode: [u32; 4],
     background: [f32; 4],
     wire_color: [f32; 4],
@@ -87,14 +87,49 @@ impl GpuMesh {
 /// Textures and factors of one texture set, bound for drawing.
 pub struct GpuMaterial {
     uniform: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-    /// Kept alive for the bind group.
-    _textures: Vec<wgpu::Texture>,
+    channel_views: Vec<wgpu::TextureView>,
+    /// One view per mesh map; neutral 1x1 textures for empty slots.
+    mesh_map_views: Vec<wgpu::TextureView>,
+    layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    /// Bind groups by displayed mesh map, created on first use.
+    bind_groups: Mutex<HashMap<MeshMap, wgpu::BindGroup>>,
 }
 
 impl GpuMaterial {
-    pub(crate) fn bind_group(&self) -> &wgpu::BindGroup {
-        &self.bind_group
+    /// Bind group showing `mesh_map` in the mesh map slot.
+    pub(crate) fn bind_group(&self, device: &wgpu::Device, mesh_map: MeshMap) -> wgpu::BindGroup {
+        let mut cache = self.bind_groups.lock().unwrap_or_else(|e| e.into_inner());
+        cache
+            .entry(mesh_map)
+            .or_insert_with(|| {
+                let mut entries = vec![wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform.as_entire_binding(),
+                }];
+                for (i, view) in self.channel_views.iter().enumerate() {
+                    entries.push(wgpu::BindGroupEntry {
+                        binding: 1 + i as u32,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    });
+                }
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                });
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(
+                        &self.mesh_map_views[mesh_map.index()],
+                    ),
+                });
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("material"),
+                    layout: &self.layout,
+                    entries: &entries,
+                })
+            })
+            .clone()
     }
 }
 
@@ -247,6 +282,9 @@ pub struct Renderer {
     pub(crate) uv_quad_pipeline: wgpu::RenderPipeline,
     pub(crate) uv_wire_pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
+    ibl: Ibl,
+    /// The environment last built, rebuilt when the settings ask for another one.
+    environment: Mutex<Option<Environment>>,
 }
 
 pub(crate) const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![
@@ -256,7 +294,7 @@ pub(crate) const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] = wgpu::vertex_at
     3 => Float32x4,
 ];
 
-pub(crate) fn vertex_layout() -> wgpu::VertexBufferLayout<'static> {
+pub fn vertex_layout() -> wgpu::VertexBufferLayout<'static> {
     wgpu::VertexBufferLayout {
         array_stride: size_of::<Vertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
@@ -313,6 +351,7 @@ impl Renderer {
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,
         });
+        material_entries.push(texture_entry(7, true));
         let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("material"),
             entries: &material_entries,
@@ -342,14 +381,24 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(format!("{COMMON_WGSL}\n{UV_WGSL}").into()),
         });
 
+        let ibl = Ibl::new(device, queue);
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scene"),
-            bind_group_layouts: &[Some(&frame_layout), Some(&material_layout)],
+            bind_group_layouts: &[
+                Some(&frame_layout),
+                Some(&material_layout),
+                Some(&ibl.layout),
+            ],
             immediate_size: 0,
         });
         let frame_only_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("frame only"),
             bind_group_layouts: &[Some(&frame_layout)],
+            immediate_size: 0,
+        });
+        let background_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("background"),
+            bind_group_layouts: &[Some(&frame_layout), None, Some(&ibl.layout)],
             immediate_size: 0,
         });
         let tonemap_pipeline_layout =
@@ -414,7 +463,7 @@ impl Renderer {
 
         let background_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("background"),
-            layout: Some(&frame_only_layout),
+            layout: Some(&background_layout),
             vertex: wgpu::VertexState {
                 module: &scene_module,
                 entry_point: Some("vs_background"),
@@ -560,6 +609,8 @@ impl Renderer {
             uv_quad_pipeline,
             uv_wire_pipeline,
             sampler,
+            ibl,
+            environment: Mutex::new(None),
         }
     }
 
@@ -670,33 +721,32 @@ impl Renderer {
                 texture::upload(&self.device, &self.queue, image, c.is_srgb(), c.label())
             })
             .collect();
-        let views: Vec<wgpu::TextureView> = textures
+        let channel_views = textures
             .iter()
             .map(|t| t.create_view(&Default::default()))
             .collect();
-        let mut entries = vec![wgpu::BindGroupEntry {
-            binding: 0,
-            resource: uniform.as_entire_binding(),
-        }];
-        for (i, view) in views.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry {
-                binding: 1 + i as u32,
-                resource: wgpu::BindingResource::TextureView(view),
-            });
-        }
-        entries.push(wgpu::BindGroupEntry {
-            binding: 6,
-            resource: wgpu::BindingResource::Sampler(&self.sampler),
-        });
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&set.name),
-            layout: &self.material_layout,
-            entries: &entries,
-        });
+        let mesh_map_views = MeshMap::ALL
+            .iter()
+            .map(|&m| {
+                let fallback;
+                let image = match set.mesh_map(m) {
+                    Some(img) => img,
+                    None => {
+                        fallback = Image::solid(1, 1, m.neutral());
+                        &fallback
+                    }
+                };
+                texture::upload(&self.device, &self.queue, image, false, m.label())
+                    .create_view(&Default::default())
+            })
+            .collect();
         GpuMaterial {
             uniform,
-            bind_group,
-            _textures: textures,
+            channel_views,
+            mesh_map_views,
+            layout: self.material_layout.clone(),
+            sampler: self.sampler.clone(),
+            bind_groups: Mutex::new(HashMap::new()),
         }
     }
 
@@ -739,10 +789,10 @@ impl Renderer {
     }
 
     fn frame_uniforms(
-        &self,
         target: &ViewportTarget,
         camera: &OrbitCamera,
         settings: &ViewportSettings,
+        spec_max_lod: f32,
     ) -> FrameUniforms {
         let aspect = target.width as f32 / target.height as f32;
         let view_proj = camera.view_proj(aspect);
@@ -751,15 +801,7 @@ impl Renderer {
         } else {
             camera.eye().extend(0.0)
         };
-        let preset = settings.preset();
-        let mut lights = [[0.0f32; 4]; 8];
-        for (i, l) in preset.lights.iter().take(4).enumerate() {
-            let d = Vec3::from(l.direction).normalize_or(Vec3::Y);
-            lights[i * 2] = [d.x, d.y, d.z, l.sharpness];
-            lights[i * 2 + 1] = [l.color[0], l.color[1], l.color[2], 0.0];
-        }
         let (s, c) = settings.env_rotation.sin_cos();
-        let rgb = |v: [f32; 3]| [v[0], v[1], v[2], 0.0];
         FrameUniforms {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: view_proj.inverse().to_cols_array_2d(),
@@ -767,19 +809,11 @@ impl Renderer {
             env: [
                 c,
                 s,
-                settings.background_sharpness(),
+                settings.background_blur.clamp(0.0, 1.0),
                 settings.background_opacity.clamp(0.0, 1.0),
             ],
-            sky_top: rgb(preset.sky_top),
-            sky_horizon: rgb(preset.sky_horizon),
-            sky_ground: rgb(preset.sky_ground),
-            lights,
-            mode: [
-                settings.view_mode.shader_id(),
-                preset.lights.len().min(4) as u32,
-                0,
-                0,
-            ],
+            env_info: [spec_max_lod, 1.0, 0.0, 0.0],
+            mode: [settings.view_mode.shader_id(), 0, 0, 0],
             background: [0.18, 0.18, 0.18, 0.0],
             wire_color: [0.75, 0.75, 0.75, 0.45],
         }
@@ -793,10 +827,26 @@ impl Renderer {
         camera: &OrbitCamera,
         settings: &ViewportSettings,
     ) {
+        let mut env_slot = self.environment.lock().unwrap_or_else(|e| e.into_inner());
+        if !env_slot
+            .as_ref()
+            .is_some_and(|e| e.matches(&settings.environment))
+        {
+            *env_slot = Some(
+                self.ibl
+                    .build(&self.device, &self.queue, &settings.environment),
+            );
+        }
+        let environment = env_slot.as_ref().expect("environment was just built");
         self.queue.write_buffer(
             &target.frame_buffer,
             0,
-            bytemuck::bytes_of(&self.frame_uniforms(target, camera, settings)),
+            bytemuck::bytes_of(&Self::frame_uniforms(
+                target,
+                camera,
+                settings,
+                environment.spec_max_lod,
+            )),
         );
         let tonemap = TonemapUniforms {
             exposure: [2f32.powf(settings.exposure_ev), 0.0, 0.0, 0.0],
@@ -844,6 +894,7 @@ impl Renderer {
                 multiview_mask: None,
             });
             pass.set_bind_group(0, &target.frame_bind_group, &[]);
+            pass.set_bind_group(2, &environment.bind_group, &[]);
             pass.set_pipeline(&self.background_pipeline);
             pass.draw(0..3, 0..1);
 
@@ -856,7 +907,11 @@ impl Renderer {
                     let Some(material) = scene.materials.get(part.material) else {
                         continue;
                     };
-                    pass.set_bind_group(1, &material.bind_group, &[]);
+                    pass.set_bind_group(
+                        1,
+                        &material.bind_group(&self.device, settings.mesh_map),
+                        &[],
+                    );
                     pass.draw_indexed(
                         part.first_index..part.first_index + part.index_count,
                         0,

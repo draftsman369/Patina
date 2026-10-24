@@ -1,0 +1,18 @@
+[package]
+name = "patina_bake"
+description = "Patina GPU mesh-map bakers: normal, AO, curvature, thickness, ID and more"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+patina_core.workspace = true
+patina_mesh.workspace = true
+wgpu.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+log.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+patina_render.workspace = true

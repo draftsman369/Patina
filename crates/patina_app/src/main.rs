@@ -1,6 +1,8 @@
 //! `patina`: the Patina editor and its command-line entry points.
 
 mod app;
+mod bake_cli;
+mod bake_job;
 mod document;
 mod snapshot;
 mod theme;
@@ -37,6 +39,10 @@ pub struct Cli {
     #[arg(long, default_value_t = 0)]
     pub env: usize,
 
+    /// Snapshot HDRI environment (.hdr or .exr), overrides --env.
+    #[arg(long, value_name = "FILE")]
+    pub hdri: Option<PathBuf>,
+
     /// Snapshot exposure in stops.
     #[arg(long, default_value_t = 0.0)]
     pub exposure: f32,
@@ -48,6 +54,38 @@ pub struct Cli {
     /// Draw the wireframe overlay in the snapshot.
     #[arg(long)]
     pub wireframe: bool,
+
+    /// Bake mesh maps of MESH into this folder and exit.
+    #[arg(long, value_name = "OUT_DIR")]
+    pub bake: Option<PathBuf>,
+
+    /// High-poly mesh for --bake (default: bake MESH onto itself).
+    #[arg(long, value_name = "FILE")]
+    pub high: Option<PathBuf>,
+
+    /// Cage mesh for --bake, with the same triangles as MESH.
+    #[arg(long, value_name = "FILE")]
+    pub cage: Option<PathBuf>,
+
+    /// Maps to bake: comma-separated (normal, world_normal, id, ao, curvature,
+    /// position, thickness, height, opacity, bent_normal) or "all".
+    #[arg(
+        long,
+        default_value = "normal,ao,curvature,thickness,position,world_normal,id"
+    )]
+    pub maps: String,
+
+    /// Bake output size.
+    #[arg(long, default_value_t = 2048)]
+    pub bake_size: u32,
+
+    /// Bake supersampling factor (1, 2, 4, 8).
+    #[arg(long, default_value_t = 2)]
+    pub supersampling: u32,
+
+    /// Pair low and high objects by name (Bolt_low / Bolt_high).
+    #[arg(long)]
+    pub match_by_name: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -57,6 +95,9 @@ fn main() -> anyhow::Result<()> {
 
     if let Some(out) = &cli.snapshot {
         return snapshot::run(&cli, out);
+    }
+    if let Some(out) = &cli.bake {
+        return bake_cli::run(&cli, out);
     }
 
     let options = eframe::NativeOptions {

@@ -155,7 +155,7 @@ impl PatinaApp {
             self.uv_view.pan(GVec2::new(d.x, d.y) * ppp);
         }
 
-        let channel = self.uv_channel();
+        let layer = self.uv_layer();
         let painter = ui.painter_at(rect);
         let set = self.doc.project.texture_sets.get(self.selected_set);
         let Some(gpu) = &mut self.gpu else {
@@ -185,12 +185,12 @@ impl PatinaApp {
         let (target, id) = gpu.uv.as_ref().unwrap();
         if let (Some(scene), Some(set)) = (&gpu.scene, set) {
             gpu.renderer
-                .render_uv(target, scene, set.material_index, &self.uv_view, channel);
+                .render_uv(target, scene, set.material_index, &self.uv_view, layer);
         }
         painter.image(*id, rect, FULL_UV, Color32::WHITE);
 
         let label = match set {
-            Some(set) => format!("UV · {} · {}", set.name, channel.label()),
+            Some(set) => format!("UV · {} · {}", set.name, layer.label()),
             None => "UV".to_owned(),
         };
         painter.text(

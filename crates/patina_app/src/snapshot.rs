@@ -3,9 +3,11 @@
 use std::path::Path;
 
 use anyhow::{Context as _, bail};
+use patina_core::HdrImage;
 use patina_mesh::primitives::Primitive;
 use patina_render::{
-    ENV_PRESETS, HeadlessGpu, OrbitCamera, Renderer, ViewMode, ViewportSettings, render_snapshot,
+    ENV_PRESETS, EnvSource, HeadlessGpu, OrbitCamera, Renderer, ViewMode, ViewportSettings,
+    render_snapshot,
 };
 
 use crate::Cli;
@@ -47,10 +49,20 @@ pub fn run(cli: &Cli, out: &Path) -> anyhow::Result<()> {
     let renderer = Renderer::new(&gpu.device, &gpu.queue);
     let scene = renderer.create_scene(&doc.mesh, &doc.project);
 
+    let environment = match &cli.hdri {
+        Some(path) => EnvSource::Hdri {
+            image: std::sync::Arc::new(
+                HdrImage::load(path)
+                    .with_context(|| format!("could not load HDRI {}", path.display()))?,
+            ),
+            name: path.display().to_string(),
+        },
+        None => EnvSource::Preset(cli.env),
+    };
     let mut camera = OrbitCamera::default();
     camera.frame(&doc.mesh.bounds());
     let settings = ViewportSettings {
-        env_preset: cli.env,
+        environment,
         exposure_ev: cli.exposure,
         view_mode,
         wireframe: cli.wireframe,

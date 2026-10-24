@@ -58,12 +58,13 @@ fn vertex(position: Vec3, normal: Vec3, uv: [f32; 2]) -> Vertex {
         position: position.to_array(),
         normal: normal.to_array(),
         uv,
-        tangent: [1.0, 0.0, 0.0, 1.0],
+        ..Default::default()
     }
 }
 
-fn finish(name: &str, mut vertices: Vec<Vertex>, indices: Vec<u32>) -> Mesh {
-    generate_tangents(&mut vertices, &indices);
+fn finish(name: &str, mut vertices: Vec<Vertex>, mut indices: Vec<u32>) -> Mesh {
+    generate_tangents(&mut vertices, &mut indices);
+    let triangles = indices.len() / 3;
     Mesh {
         name: name.to_owned(),
         parts: vec![MeshPart {
@@ -75,6 +76,8 @@ fn finish(name: &str, mut vertices: Vec<Vertex>, indices: Vec<u32>) -> Mesh {
         indices,
         materials: vec![MaterialDesc::named(name)],
         has_uvs: true,
+        objects: vec![name.to_owned()],
+        triangle_objects: vec![0; triangles],
     }
 }
 

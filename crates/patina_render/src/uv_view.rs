@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use glam::Vec2;
-use patina_core::Channel;
+use patina_core::{Channel, MeshMap};
 
 use crate::renderer::{MSAA_SAMPLES, OUTPUT_FORMAT, Renderer, Scene};
 
@@ -10,6 +10,36 @@ struct UvParams {
     transform: [f32; 4],
     channel: [u32; 4],
     wire_color: [f32; 4],
+}
+
+/// What the UV view shows under the wireframe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UvLayer {
+    Channel(Channel),
+    MeshMap(MeshMap),
+}
+
+impl UvLayer {
+    fn shader_id(self) -> u32 {
+        match self {
+            UvLayer::Channel(c) => c.index() as u32,
+            UvLayer::MeshMap(_) => Channel::COUNT as u32,
+        }
+    }
+
+    fn mesh_map(self) -> MeshMap {
+        match self {
+            UvLayer::MeshMap(m) => m,
+            UvLayer::Channel(_) => MeshMap::Normal,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            UvLayer::Channel(c) => c.label(),
+            UvLayer::MeshMap(m) => m.label(),
+        }
+    }
 }
 
 /// Pan/zoom state of the 2D UV view.
@@ -153,19 +183,19 @@ impl UvTarget {
 }
 
 impl Renderer {
-    /// Renders the UV layout of mesh part `part` over the given channel.
+    /// Renders the UV layout of mesh part `part` over the given layer.
     pub fn render_uv(
         &self,
         target: &UvTarget,
         scene: &Scene,
         part: usize,
         view: &UvView,
-        channel: Channel,
+        layer: UvLayer,
     ) {
         let size = Vec2::new(target.width as f32, target.height as f32);
         let params = UvParams {
             transform: view.transform(size),
-            channel: [channel.index() as u32, u32::from(scene.mesh.has_uvs), 0, 0],
+            channel: [layer.shader_id(), u32::from(scene.mesh.has_uvs), 0, 0],
             wire_color: [0.95, 0.95, 0.95, 0.55],
         };
         self.queue
@@ -196,7 +226,7 @@ impl Renderer {
             let gpu_part = scene.mesh.part(part);
             let material = gpu_part.and_then(|p| scene.materials.get(p.material));
             if let (Some(p), Some(material)) = (gpu_part, material) {
-                pass.set_bind_group(1, material.bind_group(), &[]);
+                pass.set_bind_group(1, &material.bind_group(&self.device, layer.mesh_map()), &[]);
                 pass.set_bind_group(2, &target.bind_group, &[]);
                 pass.set_pipeline(&self.uv_quad_pipeline);
                 pass.draw(0..3, 0..1);

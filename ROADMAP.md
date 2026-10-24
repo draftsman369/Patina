@@ -60,7 +60,7 @@ The checklist below is the full scope. Each item is tagged with the milestone th
 - [x] 3D viewport: orbit/pan/zoom (Alt+LMB/MMB/RMB, wheel, MMB fallback), frame (F), camera presets, ortho toggle — **M1**
 - [x] 2D UV view, split 3D/2D (F1/F2/F3), UV wireframe overlay — **M1**
 - [x] Real-time PBR (metal/rough) with an analytic studio environment — **M1**
-- [ ] HDRI environments (.hdr/.exr), prefiltered IBL (specular mip chain + irradiance SH), rotation (Shift+RMB), exposure, blur, background opacity — **M2**
+- [x] HDRI environments (.hdr/.exr), prefiltered IBL (specular mip chain + irradiance SH), rotation (Shift+RMB), exposure, blur, background opacity — **M2**
 - [ ] Spec/gloss shader, unlit shader, custom shader slots (WGSL) — **M7**
 - [ ] Single-channel views (C/M/B shortcuts): base color, metallic, roughness, normal, height, AO, mesh maps — **M1/M2**
 - [ ] Wireframe overlay — **M1**; shadows (shadow-mapped key light), SSAO — **M7**
@@ -74,14 +74,14 @@ The checklist below is the full scope. Each item is tagged with the milestone th
 
 All bakers run on the GPU in compute shaders.
 
-- [ ] High-poly → low-poly with ray distance (front/rear), cage mesh, average normals, match by mesh name — **M2**
-- [ ] Normal (tangent space, MikkTSpace exact), World space normal — **M2**
-- [ ] Ambient occlusion (with ignore-backface, self-occlusion by name) — **M2**
+- [x] High-poly → low-poly with ray distance (front/rear), cage mesh, average normals, match by mesh name — **M2**
+- [x] Normal (tangent space, MikkTSpace exact), World space normal — **M2**
+- [x] Ambient occlusion (with ignore-backface, self-occlusion by name) — **M2**
 - [ ] Curvature (from mesh and from normal), Position, Thickness, Height — **M2**
 - [ ] ID map (from vertex color, material color, mesh ID, polygroup) — **M2**
-- [ ] Opacity, Bent normals — **M2**
+- [x] Opacity, Bent normals — **M2**
 - [ ] Anti-aliasing (supersampling), dilation/padding, per-map resolution — **M2**
-- [ ] Import external mesh maps into texture set slots — **M2**
+- [x] Import external mesh maps into texture set slots — **M2**
 
 ### 1.4 Channels & texture sets
 
@@ -261,20 +261,20 @@ Goal: open a mesh and look at it with correct PBR shading in a Painter-like inte
 
 ### M2 — HDRI lighting & baking
 
-- [ ] HDRI loading (.hdr/.exr)
+- [x] HDRI loading (.hdr/.exr)
   - equirect → cubemap
   - GGX prefiltered specular mips
   - irradiance (SH9)
   - BRDF LUT
-- [ ] FBX import; exact MikkTSpace tangents
-- [ ] BVH (CPU build, GPU traversal in compute)
-- [ ] Bakers: normal, world normal, ID, AO, curvature, position, thickness, height, opacity, bent normal
+- [x] FBX import; exact MikkTSpace tangents
+- [x] BVH (CPU build, GPU traversal in compute)
+- [x] Bakers: normal, world normal, ID, AO, curvature, position, thickness, height, opacity, bent normal
   - high→low with cage
   - match by name
   - supersampling
   - dilation
-- [ ] Baking dialog with per-map settings, progress, cancel
-- [ ] Mesh map slots in texture set settings; mesh-map viewport views (B shortcut)
+- [x] Baking dialog with per-map settings, progress, cancel
+- [x] Mesh map slots in texture set settings; mesh-map viewport views (B shortcut)
 
 **Exit criteria:** baking matches reference bakes from other bakers within tolerance on test meshes.
 

@@ -31,16 +31,24 @@ repeats outside it are dimmed.
 **Material** shows the fully lit result. The other modes show one channel
 unlit: base color, metallic, roughness, normal (the tangent-space map as
 stored), world normal (the final shading normal), UV checker and emissive.
+**Mesh Map** shows a baked or imported mesh map (see [Baking](baking.md)).
 
-Press **C** to cycle through channel views and **M** to return to the material view.
+| Key | View |
+|---|---|
+| C | Cycle channel views |
+| B | Show mesh maps; press again to cycle them |
+| M | Back to the material view |
+
+The **Viewport › Mesh map** menu picks a map directly.
 
 ## Lighting and display
 
 Display Settings controls:
 
 - **Environment**: one of five analytic studio setups (Studio Soft, Studio
-  Contrast, Overcast, Sunset, Night Rim). The shelf's Environments tab shows
-  them as swatches. HDRI images arrive in M2.
+  Contrast, Overcast, Sunset, Night Rim) or an **HDRI** (`.hdr` or `.exr`).
+  Load HDRIs with **File › Load HDRI…**, the shelf's Environments tab, or by
+  dropping the file on the window. Loaded HDRIs stay in the list for the session.
 - **Rotation**, **exposure** (in stops), **background blur** and **background opacity**.
 - **Tonemapping**: ACES (default), Filmic or Linear.
 - **Wireframe** overlay.

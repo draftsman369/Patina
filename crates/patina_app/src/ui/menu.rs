@@ -1,5 +1,5 @@
 use patina_mesh::primitives::Primitive;
-use patina_render::{ENV_PRESETS, ViewMode};
+use patina_render::ViewMode;
 
 use crate::app::{Action, Layout, NewProjectDialog, PatinaApp};
 
@@ -101,6 +101,14 @@ impl PatinaApp {
                 }
             });
         });
+        if ui.button("Bake mesh maps…").clicked() {
+            self.actions.push(Action::OpenBakeDialog);
+            ui.close();
+        }
+        if ui.button("Load HDRI…").clicked() {
+            self.actions.push(Action::PickHdri);
+            ui.close();
+        }
         ui.separator();
         // Project files (.patina) arrive in M3.
         ui.add_enabled(
@@ -139,15 +147,33 @@ impl PatinaApp {
             ui.weak("C cycles channels");
         });
         ui.menu_button("Environment", |ui| {
-            for (i, preset) in ENV_PRESETS.iter().enumerate() {
+            for env in self.environment_choices() {
                 if ui
-                    .selectable_label(self.settings.env_preset == i, preset.name)
+                    .selectable_label(self.settings.environment == env, env.name())
                     .clicked()
                 {
-                    self.settings.env_preset = i;
+                    self.settings.environment = env;
                     ui.close();
                 }
             }
+            ui.separator();
+            if ui.button("Load HDRI…").clicked() {
+                self.actions.push(Action::PickHdri);
+                ui.close();
+            }
+        });
+        ui.menu_button("Mesh map", |ui| {
+            for map in patina_core::MeshMap::ALL {
+                let selected =
+                    self.settings.view_mode == ViewMode::MeshMap && self.settings.mesh_map == map;
+                if ui.selectable_label(selected, map.label()).clicked() {
+                    self.settings.view_mode = ViewMode::MeshMap;
+                    self.settings.mesh_map = map;
+                    ui.close();
+                }
+            }
+            ui.separator();
+            ui.weak("B cycles mesh maps");
         });
         ui.checkbox(&mut self.settings.wireframe, "Wireframe");
         ui.checkbox(&mut self.camera.orthographic, "Orthographic");

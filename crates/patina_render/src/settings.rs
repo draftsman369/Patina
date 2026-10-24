@@ -1,3 +1,7 @@
+use patina_core::MeshMap;
+
+use crate::environment::EnvSource;
+
 /// What the viewport displays. Values match the `VIEW_*` constants in common.wgsl.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ViewMode {
@@ -13,10 +17,12 @@ pub enum ViewMode {
     WorldNormal,
     UvChecker,
     Emissive,
+    /// The mesh map chosen in [`ViewportSettings::mesh_map`] (B shortcut).
+    MeshMap,
 }
 
 impl ViewMode {
-    pub const ALL: [ViewMode; 8] = [
+    pub const ALL: [ViewMode; 9] = [
         ViewMode::Material,
         ViewMode::BaseColor,
         ViewMode::Metallic,
@@ -25,6 +31,7 @@ impl ViewMode {
         ViewMode::WorldNormal,
         ViewMode::UvChecker,
         ViewMode::Emissive,
+        ViewMode::MeshMap,
     ];
 
     pub fn label(self) -> &'static str {
@@ -37,6 +44,7 @@ impl ViewMode {
             ViewMode::WorldNormal => "World Normal",
             ViewMode::UvChecker => "UV Checker",
             ViewMode::Emissive => "Emissive",
+            ViewMode::MeshMap => "Mesh Map",
         }
     }
 
@@ -47,14 +55,13 @@ impl ViewMode {
             .find(|m| norm(m.label()) == norm(name))
     }
 
-    /// The next channel view, used by the C shortcut (skips Material).
+    /// The next channel view, used by the C shortcut (skips Material and Mesh Map).
     pub fn next_channel(self) -> Self {
-        let i = Self::ALL.iter().position(|&m| m == self).unwrap_or(0);
-        let next = Self::ALL[(i + 1) % Self::ALL.len()];
-        if next == ViewMode::Material {
-            Self::ALL[1]
-        } else {
-            next
+        let cycle = &Self::ALL[1..Self::ALL.len() - 1];
+        let i = cycle.iter().position(|&m| m == self);
+        match i {
+            Some(i) => cycle[(i + 1) % cycle.len()],
+            None => cycle[0],
         }
     }
 
@@ -165,8 +172,8 @@ pub const ENV_PRESETS: [EnvPreset; 5] = [
 /// Display settings for one viewport.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewportSettings {
-    /// Index into [`ENV_PRESETS`].
-    pub env_preset: usize,
+    /// Lighting: an analytic preset or an HDRI.
+    pub environment: EnvSource,
     /// Environment rotation around Y, radians.
     pub env_rotation: f32,
     /// Exposure in stops.
@@ -177,34 +184,24 @@ pub struct ViewportSettings {
     pub background_opacity: f32,
     pub tonemap: Tonemap,
     pub view_mode: ViewMode,
+    /// Mesh map shown by [`ViewMode::MeshMap`].
+    pub mesh_map: MeshMap,
     pub wireframe: bool,
 }
 
 impl Default for ViewportSettings {
     fn default() -> Self {
         Self {
-            env_preset: 0,
+            environment: EnvSource::Preset(0),
             env_rotation: 0.0,
             exposure_ev: 0.0,
             background_blur: 0.6,
             background_opacity: 1.0,
             tonemap: Tonemap::Aces,
             view_mode: ViewMode::Material,
+            mesh_map: MeshMap::Normal,
             wireframe: false,
         }
-    }
-}
-
-impl ViewportSettings {
-    pub fn preset(&self) -> &'static EnvPreset {
-        &ENV_PRESETS[self.env_preset.min(ENV_PRESETS.len() - 1)]
-    }
-
-    /// Kernel sharpness used to blur the background (see `env_radiance` in WGSL).
-    pub(crate) fn background_sharpness(&self) -> f32 {
-        let t = self.background_blur.clamp(0.0, 1.0);
-        // Exponential ramp from razor sharp to very soft.
-        (3000.0f32.ln() * (1.0 - t) + 1.5f32.ln() * t).exp()
     }
 }
 
@@ -218,6 +215,7 @@ mod tests {
         assert_eq!(ViewMode::Material.shader_id(), 0);
         assert_eq!(ViewMode::UvChecker.shader_id(), 6);
         assert_eq!(ViewMode::Emissive.shader_id(), 7);
+        assert_eq!(ViewMode::MeshMap.shader_id(), 8);
     }
 
     #[test]
@@ -236,8 +234,10 @@ mod tests {
         for _ in 0..20 {
             m = m.next_channel();
             assert_ne!(m, ViewMode::Material);
+            assert_ne!(m, ViewMode::MeshMap);
         }
         assert_eq!(ViewMode::Emissive.next_channel(), ViewMode::BaseColor);
+        assert_eq!(ViewMode::MeshMap.next_channel(), ViewMode::BaseColor);
     }
 
     #[test]
@@ -245,16 +245,5 @@ mod tests {
         for p in ENV_PRESETS {
             assert!(p.lights.len() <= 4, "{} has too many lights", p.name);
         }
-    }
-
-    #[test]
-    fn background_blur_is_monotonic() {
-        let mut s = ViewportSettings {
-            background_blur: 0.0,
-            ..Default::default()
-        };
-        let sharp = s.background_sharpness();
-        s.background_blur = 1.0;
-        assert!(s.background_sharpness() < sharp);
     }
 }

@@ -5,10 +5,13 @@ use std::time::Instant;
 
 use eframe::egui_wgpu;
 use egui::TextureId;
-use patina_core::{Channel, Image, NormalFormat};
+use std::sync::Arc;
+
+use patina_core::{Channel, HdrImage, Image, MeshMap, NormalFormat};
 use patina_mesh::primitives::Primitive;
 use patina_render::{
-    OrbitCamera, Renderer, Scene, UvTarget, UvView, ViewMode, ViewportSettings, ViewportTarget,
+    ENV_PRESETS, EnvSource, OrbitCamera, Renderer, Scene, UvLayer, UvTarget, UvView, ViewMode,
+    ViewportSettings, ViewportTarget,
 };
 
 use crate::document::{self, Document};
@@ -127,6 +130,22 @@ pub enum Action {
     /// Normal map convention changed for the whole project.
     NormalFormatChanged,
     FrameCamera,
+    PickHdri,
+    LoadHdri(PathBuf),
+    PickMeshMap {
+        set: usize,
+        map: MeshMap,
+    },
+    LoadMeshMap {
+        set: usize,
+        map: MeshMap,
+        path: PathBuf,
+    },
+    ClearMeshMap {
+        set: usize,
+        map: MeshMap,
+    },
+    OpenBakeDialog,
 }
 
 /// GPU resources owned by the editor.
@@ -184,6 +203,9 @@ pub struct PatinaApp {
     pub new_project: Option<NewProjectDialog>,
     pub show_about: bool,
     pub actions: Vec<Action>,
+    /// HDRIs loaded this session, shown next to the presets.
+    pub hdris: Vec<EnvSource>,
+    pub bake_dialog: Option<crate::ui::bake::BakeDialog>,
 }
 
 impl PatinaApp {
@@ -220,6 +242,8 @@ impl PatinaApp {
             new_project: None,
             show_about: false,
             actions: Vec::new(),
+            hdris: Vec::new(),
+            bake_dialog: None,
         };
         if app.gpu.is_none() {
             app.set_error("No wgpu render state: the viewport is disabled");
@@ -270,7 +294,7 @@ impl PatinaApp {
     }
 
     /// Re-uploads one texture set's textures.
-    fn rebuild_material(&mut self, set_index: usize) {
+    pub(crate) fn rebuild_material(&mut self, set_index: usize) {
         let (Some(gpu), Some(set)) = (&mut self.gpu, self.doc.project.texture_sets.get(set_index))
         else {
             return;
@@ -326,14 +350,61 @@ impl PatinaApp {
         self.recent.truncate(MAX_RECENT);
     }
 
-    /// The UV view shows the channel matching the current 3D view mode.
-    pub fn uv_channel(&self) -> Channel {
+    /// The UV view shows the channel (or mesh map) matching the 3D view mode.
+    pub fn uv_layer(&self) -> UvLayer {
         match self.settings.view_mode {
-            ViewMode::Metallic => Channel::Metallic,
-            ViewMode::Roughness => Channel::Roughness,
-            ViewMode::Normal => Channel::Normal,
-            ViewMode::Emissive => Channel::Emissive,
-            _ => Channel::BaseColor,
+            ViewMode::Metallic => UvLayer::Channel(Channel::Metallic),
+            ViewMode::Roughness => UvLayer::Channel(Channel::Roughness),
+            ViewMode::Normal => UvLayer::Channel(Channel::Normal),
+            ViewMode::Emissive => UvLayer::Channel(Channel::Emissive),
+            ViewMode::MeshMap => UvLayer::MeshMap(self.settings.mesh_map),
+            _ => UvLayer::Channel(Channel::BaseColor),
+        }
+    }
+
+    /// Presets followed by the HDRIs loaded this session.
+    pub fn environment_choices(&self) -> Vec<EnvSource> {
+        (0..ENV_PRESETS.len())
+            .map(EnvSource::Preset)
+            .chain(self.hdris.iter().cloned())
+            .collect()
+    }
+
+    pub fn load_hdri(&mut self, path: PathBuf) {
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "HDRI".into());
+        match HdrImage::load(&path) {
+            Ok(image) => {
+                let (w, h) = (image.width, image.height);
+                let env = EnvSource::Hdri {
+                    image: Arc::new(image),
+                    name: name.clone(),
+                };
+                self.hdris.retain(|e| e.name() != name);
+                self.hdris.push(env.clone());
+                self.settings.environment = env;
+                self.set_status(format!("Loaded HDRI {name} ({w}x{h})"));
+            }
+            Err(e) => self.set_error(format!("Could not load HDRI {}: {e}", path.display())),
+        }
+    }
+
+    fn load_mesh_map(&mut self, set: usize, map: MeshMap, path: PathBuf) {
+        match Image::load(&path) {
+            Ok(image) => {
+                let Some(ts) = self.doc.project.texture_sets.get_mut(set) else {
+                    return;
+                };
+                ts.set_mesh_map(map, Some(image));
+                let name = ts.name.clone();
+                self.rebuild_material(set);
+                self.settings.view_mode = ViewMode::MeshMap;
+                self.settings.mesh_map = map;
+                self.set_status(format!("Imported {} map into {name}", map.label()));
+            }
+            Err(e) => self.set_error(format!("Could not load {}: {e}", path.display())),
         }
     }
 
@@ -408,6 +479,33 @@ impl PatinaApp {
                     self.camera.frame(&self.doc.mesh.bounds());
                     self.uv_fit_pending = true;
                 }
+                Action::PickHdri => {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_title("Load HDRI")
+                        .add_filter("HDR images", document::HDRI_EXTENSIONS)
+                        .pick_file()
+                    {
+                        self.load_hdri(path);
+                    }
+                }
+                Action::LoadHdri(path) => self.load_hdri(path),
+                Action::OpenBakeDialog => self.open_bake_dialog(),
+                Action::PickMeshMap { set, map } => {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_title(format!("Import {} map", map.label()))
+                        .add_filter("Images", document::IMAGE_EXTENSIONS)
+                        .pick_file()
+                    {
+                        self.load_mesh_map(set, map, path);
+                    }
+                }
+                Action::LoadMeshMap { set, map, path } => self.load_mesh_map(set, map, path),
+                Action::ClearMeshMap { set, map } => {
+                    if let Some(ts) = self.doc.project.texture_sets.get_mut(set) {
+                        ts.set_mesh_map(map, None);
+                        self.rebuild_material(set);
+                    }
+                }
             }
         }
     }
@@ -454,12 +552,13 @@ impl PatinaApp {
         for path in dropped {
             if document::is_mesh_path(&path) {
                 self.actions.push(Action::OpenMesh(path));
+            } else if document::is_hdri_path(&path) {
+                self.actions.push(Action::LoadHdri(path));
             } else if document::is_image_path(&path) {
-                let channel = self.uv_channel();
-                self.actions.push(Action::LoadChannelImage {
-                    set: self.selected_set,
-                    channel,
-                    path,
+                let set = self.selected_set;
+                self.actions.push(match self.uv_layer() {
+                    UvLayer::Channel(channel) => Action::LoadChannelImage { set, channel, path },
+                    UvLayer::MeshMap(map) => Action::LoadMeshMap { set, map, path },
                 });
             } else {
                 self.set_error(format!("Unsupported file: {}", path.display()));
@@ -500,6 +599,14 @@ impl PatinaApp {
                 if i.key_pressed(Key::M) {
                     self.settings.view_mode = ViewMode::Material;
                 }
+                if i.key_pressed(Key::B) {
+                    // First press shows mesh maps, next presses cycle through them.
+                    if self.settings.view_mode == ViewMode::MeshMap {
+                        self.settings.mesh_map = self.settings.mesh_map.next();
+                    } else {
+                        self.settings.view_mode = ViewMode::MeshMap;
+                    }
+                }
             }
         });
     }
@@ -522,6 +629,8 @@ impl eframe::App for PatinaApp {
         self.side_panel(ui);
         self.central(ui);
         self.dialogs(&ctx);
+        self.bake_window(&ctx);
+        self.poll_bake(&ctx);
         self.drop_overlay(&ctx);
 
         self.apply_actions();

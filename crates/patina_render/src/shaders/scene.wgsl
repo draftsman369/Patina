@@ -1,6 +1,53 @@
 // Viewport scene: background, PBR mesh and wireframe overlay.
 // Prefixed with common.wgsl.
 
+struct Frame {
+    view_proj: mat4x4<f32>,
+    inv_view_proj: mat4x4<f32>,
+    // xyz = camera position (direction toward the camera when orthographic), w = 1 for orthographic.
+    camera_pos: vec4<f32>,
+    // x = cos(rotation), y = sin(rotation), z = background blur (0-1), w = background opacity.
+    env: vec4<f32>,
+    // x = highest specular mip, y = environment intensity.
+    env_info: vec4<f32>,
+    // x = view mode.
+    mode: vec4<u32>,
+    // rgb = flat background color (HDR).
+    background: vec4<f32>,
+    wire_color: vec4<f32>,
+}
+
+@group(0) @binding(0) var<uniform> frame: Frame;
+
+@group(2) @binding(0) var env_cube: texture_cube<f32>;
+@group(2) @binding(1) var env_specular: texture_cube<f32>;
+@group(2) @binding(2) var brdf_lut: texture_2d<f32>;
+@group(2) @binding(3) var env_sampler: sampler;
+@group(2) @binding(4) var<uniform> sh: array<vec4<f32>, 9>;
+
+// World direction → environment space (rotation around Y).
+fn rotate_env(d: vec3<f32>) -> vec3<f32> {
+    let c = frame.env.x;
+    let s = frame.env.y;
+    return vec3(c * d.x + s * d.z, d.y, -s * d.x + c * d.z);
+}
+
+// Diffuse irradiance divided by π, from SH9 convolved with a clamped cosine.
+fn irradiance(n: vec3<f32>) -> vec3<f32> {
+    let d = rotate_env(n);
+    var e = sh[0].rgb * 0.282095;
+    e += (sh[1].rgb * d.y + sh[2].rgb * d.z + sh[3].rgb * d.x) * (0.488603 * 2.0 / 3.0);
+    e += (sh[4].rgb * (1.092548 * d.x * d.y) + sh[5].rgb * (1.092548 * d.y * d.z)
+        + sh[6].rgb * (0.315392 * (3.0 * d.z * d.z - 1.0)) + sh[7].rgb * (1.092548 * d.x * d.z)
+        + sh[8].rgb * (0.546274 * (d.x * d.x - d.y * d.y))) * 0.25;
+    return max(e, vec3(0.0)) * frame.env_info.y;
+}
+
+fn specular_env(r: vec3<f32>, roughness: f32) -> vec3<f32> {
+    return textureSampleLevel(env_specular, env_sampler, rotate_env(r), roughness * frame.env_info.x).rgb
+        * frame.env_info.y;
+}
+
 struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -25,16 +72,6 @@ fn vs_mesh(v: VertexIn) -> VertexOut {
     out.uv = v.uv;
     out.tangent = v.tangent;
     return out;
-}
-
-// Karis' analytic approximation of the split-sum environment BRDF.
-fn env_brdf(f0: vec3<f32>, roughness: f32, n_dot_v: f32) -> vec3<f32> {
-    let c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
-    let c1 = vec4(1.0, 0.0425, 1.04, -0.04);
-    let r = roughness * c0 + c1;
-    let a004 = min(r.x * r.x, exp2(-9.28 * n_dot_v)) * r.x + r.y;
-    let ab = vec2(-1.04, 1.04) * a004 + r.zw;
-    return f0 * ab.x + ab.y;
 }
 
 fn checker(uv: vec2<f32>) -> vec3<f32> {
@@ -67,6 +104,7 @@ fn fs_mesh(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     var roughness = material.params.y;
     var emissive = material.emissive.rgb;
     var tex_normal = vec3(0.5, 0.5, 1.0);
+    var mesh_map = vec3(0.0);
     var n = ng;
     if has_uvs {
         base *= textureSample(t_base_color, s_material, uv);
@@ -74,6 +112,7 @@ fn fs_mesh(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
         roughness *= textureSample(t_roughness, s_material, uv).r;
         emissive *= textureSample(t_emissive, s_material, uv).rgb;
         tex_normal = textureSample(t_normal, s_material, uv).rgb;
+        mesh_map = textureSample(t_mesh_map, s_material, uv).rgb;
 
         var ts = tex_normal * 2.0 - 1.0;
         ts.y *= material.params.z;
@@ -86,7 +125,6 @@ fn fs_mesh(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     let mode = frame.mode.x;
     let v = normalize(select(
         frame.camera_pos.xyz - in.world_pos,
-        // Orthographic: constant view direction (camera position holds the direction).
         frame.camera_pos.xyz,
         frame.camera_pos.w > 0.5,
     ));
@@ -98,6 +136,7 @@ fn fs_mesh(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
         case VIEW_NORMAL: { return vec4(display_data(tex_normal), 1.0); }
         case VIEW_WORLD_NORMAL: { return vec4(display_data(n * 0.5 + 0.5), 1.0); }
         case VIEW_EMISSIVE: { return vec4(emissive, 1.0); }
+        case VIEW_MESH_MAP: { return vec4(display_data(mesh_map), 1.0); }
         case VIEW_UV_CHECKER: {
             let shade = 0.35 + 0.65 * max(dot(n, v), 0.0);
             return vec4(checker(uv) * shade, 1.0);
@@ -105,23 +144,21 @@ fn fs_mesh(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
         default: {}
     }
 
-    // Metal/rough PBR lit by the analytic environment.
+    // Metal/rough PBR with image-based lighting (split-sum specular, SH9 diffuse).
     roughness = clamp(roughness, 0.03, 1.0);
     metallic = clamp(metallic, 0.0, 1.0);
     let n_dot_v = clamp(dot(n, v), 1e-4, 1.0);
     let f0 = mix(vec3(0.04), base.rgb, metallic);
-    let alpha = roughness * roughness;
 
     let r = reflect(-v, n);
-    // GGX lobe approximated as a spherical Gaussian of sharpness 2 / alpha^2.
-    let spec_k = 2.0 / (alpha * alpha);
     // Fade reflections that point below the geometric surface.
     let horizon = clamp(1.0 + dot(r, ng), 0.0, 1.0);
-    let specular = env_radiance(r, spec_k) * env_brdf(f0, roughness, n_dot_v) * horizon * horizon;
+    let ab = textureSampleLevel(brdf_lut, env_sampler, vec2(n_dot_v, roughness), 0.0).rg;
+    let specular = specular_env(r, roughness) * (f0 * ab.x + ab.y) * horizon * horizon;
 
-    // Clamped-cosine lobe ~ spherical Gaussian of sharpness 2.
-    let irradiance = env_radiance(n, 2.0);
-    let diffuse = base.rgb * (1.0 - metallic) * irradiance * (1.0 - f0);
+    // Roughness-aware Fresnel keeps diffuse + specular energy in check.
+    let fresnel = f0 + (max(vec3(1.0 - roughness), f0) - f0) * pow(1.0 - n_dot_v, 5.0);
+    let diffuse = base.rgb * (1.0 - metallic) * (1.0 - fresnel) * irradiance(n);
 
     return vec4(diffuse + specular + emissive, 1.0);
 }
@@ -151,8 +188,11 @@ fn fs_background(in: BackgroundOut) -> @location(0) vec4<f32> {
     }
     let near = frame.inv_view_proj * vec4(in.ndc, 0.0, 1.0);
     let far = frame.inv_view_proj * vec4(in.ndc, 1.0, 1.0);
-    let dir = normalize(far.xyz / far.w - near.xyz / near.w);
-    let env = env_radiance(dir, frame.env.z);
+    let dir = rotate_env(normalize(far.xyz / far.w - near.xyz / near.w));
+    let blur = frame.env.z;
+    let sharp = textureSampleLevel(env_cube, env_sampler, dir, 0.0).rgb;
+    let soft = textureSampleLevel(env_specular, env_sampler, dir, blur * frame.env_info.x).rgb;
+    let env = mix(sharp, soft, clamp(blur * 6.0, 0.0, 1.0)) * frame.env_info.y;
     return vec4(mix(frame.background.rgb, env, frame.env.w), 1.0);
 }
 
