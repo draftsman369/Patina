@@ -1,0 +1,5 @@
+[book]
+title = "Patina Manual"
+authors = ["The Patina contributors"]
+language = "en"
+src = "src"

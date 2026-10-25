@@ -1,0 +1,17 @@
+[package]
+name = "patina_mesh"
+description = "Patina mesh data, import (OBJ, glTF), primitives and tangent generation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+patina_core.workspace = true
+thiserror.workspace = true
+log.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
+gltf.workspace = true
+tobj.workspace = true
+mikktspace.workspace = true
+ufbx.workspace = true

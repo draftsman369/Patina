@@ -1,0 +1,24 @@
+[package]
+name = "patina_app"
+description = "Patina editor: egui interface and the `patina` binary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "patina"
+path = "src/main.rs"
+
+[dependencies]
+patina_core.workspace = true
+patina_mesh.workspace = true
+patina_render.workspace = true
+eframe.workspace = true
+egui.workspace = true
+glam.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+clap.workspace = true
+rfd.workspace = true
+patina_bake.workspace = true
